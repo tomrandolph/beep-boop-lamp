@@ -1,3 +1,5 @@
 build/
 sdkconfig*
 !sdkconfig.default
+.env*
+!.env.example

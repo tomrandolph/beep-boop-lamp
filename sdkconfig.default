@@ -1,3 +1,7 @@
+# Custom config
+CONFIG_MQTT_BROKER_URI=""
+CONFIG_MQTT_USERNAME=""
+CONFIG_MQTT_PASSWORD=""
 #
 # Automatically generated file. DO NOT EDIT.
 # Espressif IoT Development Framework (ESP-IDF) 5.5.1 Project Configuration

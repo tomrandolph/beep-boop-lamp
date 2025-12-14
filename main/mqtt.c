@@ -15,6 +15,11 @@
 #include "lwip/err.h"          //light weight ip packets error handling
 #include "lwip/sys.h"          //system applications for light weight ip apps
 #define LED_GPIO 2
+
+#define MQTT_BROKER_URI CONFIG_MQTT_BROKER_URI
+#define MQTT_USERNAME CONFIG_MQTT_USERNAME
+#define MQTT_PASSWORD CONFIG_MQTT_PASSWORD
+
 static int count = 0;
 static const char *TAG = "mqtt";
 static int retry_num = 0;
@@ -134,8 +139,6 @@ void blink_led()
 
     gpio_set_level(LED_GPIO, state);
 }
-
-const char *BROKER_URI = "mqtts://e8497b20de6742e9a7051fce5944cdc4.s1.eu.hivemq.cloud:8883";
 
 static bool mqtt_connected = false;
 

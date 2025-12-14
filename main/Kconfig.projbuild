@@ -1,0 +1,18 @@
+menu "MQTT Configuration"
+
+    config MQTT_BROKER_URI
+        string "MQTT broker URI"
+        default ""
+        help
+            Example: mqtts://broker.example.com:8883
+    
+    config MQTT_USERNAME
+        string "MQTT username"
+        default ""
+    
+    config MQTT_PASSWORD
+        string "MQTT password"
+        default ""
+    
+    endmenu
+    
