@@ -14,8 +14,9 @@
 
 static bool mqtt_connected = false;
 
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
-                               int32_t event_id, void *event_data) {
+static void mqtt_connection_event_handler(void *handler_args,
+                                          esp_event_base_t base,
+                                          int32_t event_id, void *event_data) {
   esp_mqtt_event_handle_t event = event_data;
   esp_mqtt_client_handle_t client = event->client;
 
@@ -32,35 +33,36 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     ESP_LOGI(MODULE_TAG, "MQTT disconnected");
     mqtt_connected = false;
     break;
-  case MQTT_EVENT_DATA:
-    ESP_LOGI(MODULE_TAG, "Received on topic: %.*s\n", event->topic_len,
-             event->topic);
-    ESP_LOGI(MODULE_TAG, "MQTT received: %.*s", event->data_len, event->data);
-    // Convert payload to a null-terminated string
-    char payload[64];
-    int len = event->data_len;
-    if (len >= sizeof(payload))
-      len = sizeof(payload) - 1;
+    //   case MQTT_EVENT_DATA:
+    //     ESP_LOGI(MODULE_TAG, "Received on topic: %.*s\n", event->topic_len,
+    //              event->topic);
+    //     ESP_LOGI(MODULE_TAG, "MQTT received: %.*s", event->data_len,
+    //     event->data);
+    //     // Convert payload to a null-terminated string
+    //     char payload[64];
+    //     int len = event->data_len;
+    //     if (len >= sizeof(payload))
+    //       len = sizeof(payload) - 1;
 
-    memcpy(payload, event->data, len);
-    payload[len] = '\0';
+    //     memcpy(payload, event->data, len);
+    //     payload[len] = '\0';
 
-    // Compare
-    if (strcmp(payload, "ON") == 0) {
-      ESP_LOGI(MODULE_TAG, "Flag set to TRUE");
-    } else if (strcmp(payload, "OFF") == 0) {
-      ESP_LOGI(MODULE_TAG, "Flag set to FALSE");
-    } else if (strcmp(payload, "BLINK") == 0) {
-      ESP_LOGI(MODULE_TAG, "Flag set to FALSE");
-    }
-    break;
+    //     // Compare
+    //     if (strcmp(payload, "ON") == 0) {
+    //       ESP_LOGI(MODULE_TAG, "Flag set to TRUE");
+    //     } else if (strcmp(payload, "OFF") == 0) {
+    //       ESP_LOGI(MODULE_TAG, "Flag set to FALSE");
+    //     } else if (strcmp(payload, "BLINK") == 0) {
+    //       ESP_LOGI(MODULE_TAG, "Flag set to FALSE");
+    //     }
+    //     break;
   default:
     break;
   }
 }
 static esp_mqtt_client_handle_t client;
 
-void start_mqtt_client(void) {
+void start_mqtt_client(esp_event_handler_t event_handler) {
 
   esp_mqtt_client_config_t mqtt_cfg = {
       .broker.address.uri = MQTT_BROKER_URI,
@@ -74,7 +76,8 @@ void start_mqtt_client(void) {
     ESP_LOGE(MODULE_TAG, "Failed to initialize MQTT client");
     return;
   }
-  esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler,
+  esp_mqtt_client_register_event(client, MQTT_EVENT_DATA, event_handler, NULL);
+  esp_mqtt_client_register_event(client, -1, mqtt_connection_event_handler,
                                  NULL);
   ESP_ERROR_CHECK(esp_mqtt_client_start(client));
 }
