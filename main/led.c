@@ -8,6 +8,7 @@
 #include "driver/rmt_types.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "led_strip_encoder.h"
 #include <string.h>
@@ -23,6 +24,7 @@
 static const char *TAG = "led_control";
 
 static uint8_t led_strip_pixels[EXAMPLE_LED_NUMBERS * 3];
+static QueueHandle_t led_state_queue = NULL;
 typedef struct {
   uint8_t r;
   uint8_t g;
@@ -111,10 +113,25 @@ void init_led_strip(void) {
 static led_state_t led_state = STATE_OFF;
 
 void set_led_state(led_state_t state) {
-  // could use queue to be reaaally careful
-  led_state = state;
+  // Thread-safe: send state change via queue (overwrite for size-1 queue)
+  if (led_state_queue != NULL) {
+    xQueueOverwrite(led_state_queue,
+                    &state); // Always succeeds for size-1 queue
+  } else {
+    // Fallback if queue not initialized (shouldn't happen in normal operation)
+    ESP_LOGW(TAG, "LED state queue not initialized, setting directly");
+    led_state = state;
+  }
 }
 void start_led_loop() {
+  // Create queue for thread-safe state updates (size 1 - we only need latest
+  // state)
+  led_state_queue = xQueueCreate(1, sizeof(led_state_t));
+  if (led_state_queue == NULL) {
+    ESP_LOGE(TAG, "Failed to create LED state queue");
+    return;
+  }
+
   uint32_t red = 0;
   uint32_t green = 0;
   uint32_t blue = 0;
@@ -126,7 +143,16 @@ void start_led_loop() {
   const TickType_t rmt_timeout =
       pdMS_TO_TICKS(100); // 100ms timeout instead of portMAX_DELAY
 
+  ESP_LOGI(TAG, "LED loop task started");
+
   while (1) {
+    // Check for state updates from queue (non-blocking)
+    led_state_t new_state;
+    if (xQueueReceive(led_state_queue, &new_state, 0) == pdTRUE) {
+      led_state = new_state;
+      ESP_LOGI(TAG, "LED state changed to %d", led_state);
+    }
+
     switch (led_state) {
     case STATE_RAINBOW_CHASE:
       for (int i = 0; i < 3; i++) {
