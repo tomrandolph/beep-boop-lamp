@@ -41,8 +41,9 @@ void app_main(void) {
   // start
   init_led_strip();
   set_led_state(STATE_OFF);
-  // start a task for led loop
-  xTaskCreate(start_led_loop, "led_loop", 2048, NULL, 5, NULL);
+  // start a task for led loop with lower priority than WiFi/MQTT
+  // Priority 3 is lower than typical MQTT (5) and WiFi (23) priorities
+  xTaskCreate(start_led_loop, "led_loop", 2048, NULL, 3, NULL);
 
   wifi_connection(on_wifi_connected_handler);
 }

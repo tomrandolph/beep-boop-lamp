@@ -123,10 +123,12 @@ void start_led_loop() {
   rmt_transmit_config_t tx_config = {
       .loop_count = 0, // no transfer loop
   };
+  const TickType_t rmt_timeout =
+      pdMS_TO_TICKS(100); // 100ms timeout instead of portMAX_DELAY
+
   while (1) {
     switch (led_state) {
     case STATE_RAINBOW_CHASE:
-
       for (int i = 0; i < 3; i++) {
         for (int j = i; j < EXAMPLE_LED_NUMBERS; j += 3) {
           // Build RGB pixels
@@ -139,37 +141,38 @@ void start_led_loop() {
         // Flush RGB values to LEDs
         ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
                                      sizeof(led_strip_pixels), &tx_config));
-        ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
+        rmt_tx_wait_all_done(
+            led_chan, rmt_timeout); // Use timeout instead of blocking forever
         vTaskDelay(pdMS_TO_TICKS(EXAMPLE_CHASE_SPEED_MS));
         memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
         ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
                                      sizeof(led_strip_pixels), &tx_config));
-        ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
+        rmt_tx_wait_all_done(led_chan, rmt_timeout);
         vTaskDelay(pdMS_TO_TICKS(EXAMPLE_CHASE_SPEED_MS));
       }
       start_rgb += 60;
       break;
     case STATE_OFF:
-      for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++) {
-
-        led_strip_pixels[i * 3 + 1] = 0;
-        led_strip_pixels[i * 3 + 2] = 0;
-        led_strip_pixels[i * 3 + 3] = 0;
-        ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
-                                     sizeof(led_strip_pixels), &tx_config));
-        ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
-      }
+      // Set all LEDs to off in one operation
+      memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
+      ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
+                                   sizeof(led_strip_pixels), &tx_config));
+      rmt_tx_wait_all_done(led_chan, rmt_timeout);
+      // Delay to prevent spinning - only update when state changes
+      vTaskDelay(pdMS_TO_TICKS(100));
       break;
     case STATE_WHITE:
+      // Set all LEDs to white in one operation
       for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++) {
-
-        led_strip_pixels[i * 3 + 1] = 127;
-        led_strip_pixels[i * 3 + 2] = 127;
-        led_strip_pixels[i * 3 + 3] = 127;
-        ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
-                                     sizeof(led_strip_pixels), &tx_config));
-        ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
+        led_strip_pixels[i * 3 + 0] = 127; // Green
+        led_strip_pixels[i * 3 + 1] = 127; // Blue
+        led_strip_pixels[i * 3 + 2] = 127; // Red
       }
+      ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
+                                   sizeof(led_strip_pixels), &tx_config));
+      rmt_tx_wait_all_done(led_chan, rmt_timeout);
+      // Delay to prevent spinning - only update when state changes
+      vTaskDelay(pdMS_TO_TICKS(100));
       break;
     }
   }
