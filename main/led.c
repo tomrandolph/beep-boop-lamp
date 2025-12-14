@@ -11,6 +11,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "led_strip_encoder.h"
+#include <stdint.h>
 #include <string.h>
 
 #define RMT_LED_STRIP_RESOLUTION_HZ                                            \
@@ -139,8 +140,10 @@ void start_led_loop() {
   uint32_t blue = 0;
   uint16_t hue = 0;
   uint16_t start_rgb = 0;
-  bool pulse_done = 0;
+  bool pulse_done = false;
+  bool pulse_rising = true;
   uint16_t pulse_ticks = 0;
+
   rmt_transmit_config_t tx_config = {
       .loop_count = 0, // no transfer loop
   };
@@ -151,7 +154,6 @@ void start_led_loop() {
 
   while (1) {
     // Check for state updates from queue (non-blocking)
-    led_state_t old_state = led_state;
     led_state_t new_state;
     if (xQueueReceive(led_state_queue, &new_state, 0) == pdTRUE) {
       led_state = new_state;
@@ -209,8 +211,20 @@ void start_led_loop() {
     case STATE_PULSE_WAVE: {
       if (!pulse_done) {
         pulse_ticks = 0;
+        pulse_done = true;
+        pulse_rising = true;
       }
-      uint8_t intensity = 255 >> (pulse_ticks);
+      uint8_t intensity;
+      if (pulse_rising) {
+        uint8_t shifts = pulse_ticks / 1;
+        if (shifts >= 7) {
+          pulse_rising = false;
+        }
+        intensity = 1 << (shifts);
+      } else {
+        intensity = 255 >> (pulse_ticks / 6);
+      }
+
       for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++) {
         led_strip_pixels[i * 3 + 0] = intensity; // Green
         led_strip_pixels[i * 3 + 1] = intensity; // Blue
@@ -223,7 +237,7 @@ void start_led_loop() {
                                    sizeof(led_strip_pixels), &tx_config));
       rmt_tx_wait_all_done(led_chan, rmt_timeout);
       // Delay to prevent spinning - only update when state changes
-      vTaskDelay(pdMS_TO_TICKS(40));
+      vTaskDelay(pdMS_TO_TICKS(10));
       break;
     }
     }
