@@ -20,6 +20,8 @@
 
 #define EXAMPLE_LED_NUMBERS 12
 #define EXAMPLE_CHASE_SPEED_MS 10
+#define EXAMPLE_PULSE_WAVE_SPEED_MS 50
+#define EXAMPLE_PULSE_WAVE_AMPLITUDE 255
 
 static const char *TAG = "led_control";
 
@@ -137,6 +139,8 @@ void start_led_loop() {
   uint32_t blue = 0;
   uint16_t hue = 0;
   uint16_t start_rgb = 0;
+  bool pulse_done = 0;
+  uint16_t pulse_ticks = 0;
   rmt_transmit_config_t tx_config = {
       .loop_count = 0, // no transfer loop
   };
@@ -147,9 +151,11 @@ void start_led_loop() {
 
   while (1) {
     // Check for state updates from queue (non-blocking)
+    led_state_t old_state = led_state;
     led_state_t new_state;
     if (xQueueReceive(led_state_queue, &new_state, 0) == pdTRUE) {
       led_state = new_state;
+      pulse_done = false;
       ESP_LOGI(TAG, "LED state changed to %d", led_state);
     }
 
@@ -200,6 +206,26 @@ void start_led_loop() {
       // Delay to prevent spinning - only update when state changes
       vTaskDelay(pdMS_TO_TICKS(100));
       break;
+    case STATE_PULSE_WAVE: {
+      if (!pulse_done) {
+        pulse_ticks = 0;
+      }
+      uint8_t intensity = 255 >> (pulse_ticks);
+      for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++) {
+        led_strip_pixels[i * 3 + 0] = intensity; // Green
+        led_strip_pixels[i * 3 + 1] = intensity; // Blue
+        led_strip_pixels[i * 3 + 2] = intensity; // Red
+      }
+      if (intensity > 0) {
+        pulse_ticks++;
+      }
+      ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
+                                   sizeof(led_strip_pixels), &tx_config));
+      rmt_tx_wait_all_done(led_chan, rmt_timeout);
+      // Delay to prevent spinning - only update when state changes
+      vTaskDelay(pdMS_TO_TICKS(40));
+      break;
+    }
     }
   }
 }

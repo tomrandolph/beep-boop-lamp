@@ -29,6 +29,8 @@ static void on_mqtt_message_handler(void *handler_args, esp_event_base_t base,
   } else if (strcmp(payload, "CHASE") == 0) {
     ESP_LOGI(MODULE_TAG, "Setting led state to rainbow chase");
     set_led_state(STATE_RAINBOW_CHASE);
+  } else if (strcmp(payload, "PULSE") == 0) {
+    set_led_state(STATE_PULSE_WAVE);
   }
 }
 static void on_wifi_connected_handler(void) {
