@@ -136,8 +136,7 @@ void blink_led()
 }
 
 const char *BROKER_URI = "mqtts://e8497b20de6742e9a7051fce5944cdc4.s1.eu.hivemq.cloud:8883";
-const char *USERNAME = "esp001";
-const char *PASSWORD = "rhg!uzg@HQT*nvj3xub";
+
 static bool mqtt_connected = false;
 
 static void
