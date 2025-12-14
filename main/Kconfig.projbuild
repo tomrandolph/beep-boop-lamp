@@ -2,17 +2,33 @@ menu "MQTT Configuration"
 
     config MQTT_BROKER_URI
         string "MQTT broker URI"
-        default ""
+        default $(MQTT_BROKER_URI) # macro expansion will fail in cannot find env variable
         help
             Example: mqtts://broker.example.com:8883
+            Set via environment variable MQTT_BROKER_URI (e.g., in .env file)
     
     config MQTT_USERNAME
         string "MQTT username"
-        default ""
+        default $(MQTT_USERNAME) # macro expansion will fail in cannot find env variable
+        help
+            Set via environment variable MQTT_USERNAME (e.g., in .env file)
     
     config MQTT_PASSWORD
         string "MQTT password"
-        default ""
+        default $(MQTT_PASSWORD) # macro expansion will fail in cannot find env variable
+        help
+            Set via environment variable MQTT_PASSWORD (e.g., in .env file)
     
+    config WIFI_SSID
+        string "WiFi SSID"
+        default $(WIFI_SSID) # macro expansion will fail in cannot find env variable
+        help
+            Set via environment variable WIFI_SSID (e.g., in .env file)
+    
+    config WIFI_PASS
+        string "WiFi password"
+        default $(WIFI_PASS) # macro expansion will fail in cannot find env variable
+        help
+            Set via environment variable WIFI_PASS (e.g., in .env file)
     endmenu
     
