@@ -162,7 +162,7 @@ void wifi_connection(const char *ssid, const char *pass,
   esp_wifi_start();
   // start connection with configurations provided in funtion
   esp_wifi_connect(); // connect with saved ssid and pass
-  ESP_LOGI(MODULE_TAG, "wifi_init_sta finished. SSID:%s  password:%s", ssid,
+  ESP_LOGI(MODULE_TAG, "wifi_init_sta finished. \nSSID:%s\npassword:%s\n", ssid,
            pass);
 }
 
