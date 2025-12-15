@@ -27,7 +27,7 @@
 static const char *TAG = "led_control";
 
 static uint8_t led_strip_pixels[EXAMPLE_LED_NUMBERS * 3];
-static QueueHandle_t led_state_queue = NULL;
+static QueueHandle_t led_command_queue = NULL;
 typedef struct {
   uint8_t r;
   uint8_t g;
@@ -113,24 +113,29 @@ void init_led_strip(void) {
   ESP_ERROR_CHECK(rmt_enable(led_chan));
 }
 
-static led_state_t led_state = STATE_OFF;
+static led_command_t led_command = {
+    .state = STATE_COLOR,
+    .r = 0,
+    .g = 0,
+    .b = 0,
+};
 
-void set_led_state(led_state_t state) {
+void set_led_cmd(led_command_t command) {
   // Thread-safe: send state change via queue (overwrite for size-1 queue)
-  if (led_state_queue != NULL) {
-    xQueueOverwrite(led_state_queue,
-                    &state); // Always succeeds for size-1 queue
+  if (led_command_queue != NULL) {
+    xQueueOverwrite(led_command_queue,
+                    &command); // Always succeeds for size-1 queue
   } else {
     // Fallback if queue not initialized (shouldn't happen in normal operation)
     ESP_LOGW(TAG, "LED state queue not initialized, setting directly");
-    led_state = state;
+    led_command = command;
   }
 }
 void start_led_loop() {
   // Create queue for thread-safe state updates (size 1 - we only need latest
   // state)
-  led_state_queue = xQueueCreate(1, sizeof(led_state_t));
-  if (led_state_queue == NULL) {
+  led_command_queue = xQueueCreate(1, sizeof(led_command_t));
+  if (led_command_queue == NULL) {
     ESP_LOGE(TAG, "Failed to create LED state queue");
     return;
   }
@@ -154,14 +159,15 @@ void start_led_loop() {
 
   while (1) {
     // Check for state updates from queue (non-blocking)
-    led_state_t new_state;
-    if (xQueueReceive(led_state_queue, &new_state, 0) == pdTRUE) {
-      led_state = new_state;
+    led_command_t new_command;
+    if (xQueueReceive(led_command_queue, &new_command, 0) == pdTRUE) {
+      led_command = new_command;
       pulse_done = false;
-      ESP_LOGI(TAG, "LED state changed to %d", led_state);
+      ESP_LOGI(TAG, "LED state changed to %d (R:%d, GP%d, B%d)",
+               led_command.state, led_command.r, led_command.g, led_command.b);
     }
 
-    switch (led_state) {
+    switch (new_command.state) {
     case STATE_RAINBOW_CHASE:
       for (int i = 0; i < 3; i++) {
         for (int j = i; j < EXAMPLE_LED_NUMBERS; j += 3) {
@@ -186,26 +192,18 @@ void start_led_loop() {
       }
       start_rgb += 60;
       break;
-    case STATE_OFF:
-      // Set all LEDs to off in one operation
-      memset(led_strip_pixels, 0, sizeof(led_strip_pixels));
-      ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
-                                   sizeof(led_strip_pixels), &tx_config));
-      rmt_tx_wait_all_done(led_chan, rmt_timeout);
-      // Delay to prevent spinning - only update when state changes
-      vTaskDelay(pdMS_TO_TICKS(100));
-      break;
-    case STATE_WHITE:
+
+    case STATE_COLOR:
+
       // Set all LEDs to white in one operation
       for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++) {
-        led_strip_pixels[i * 3 + 0] = 127; // Green
-        led_strip_pixels[i * 3 + 1] = 127; // Blue
-        led_strip_pixels[i * 3 + 2] = 127; // Red
+        led_strip_pixels[i * 3 + 0] = led_command.g; // Green
+        led_strip_pixels[i * 3 + 1] = led_command.b; // Blue
+        led_strip_pixels[i * 3 + 2] = led_command.r; // Red
       }
       ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
                                    sizeof(led_strip_pixels), &tx_config));
       rmt_tx_wait_all_done(led_chan, rmt_timeout);
-      // Delay to prevent spinning - only update when state changes
       vTaskDelay(pdMS_TO_TICKS(100));
       break;
     case STATE_PULSE_WAVE: {
@@ -226,9 +224,12 @@ void start_led_loop() {
       }
 
       for (int i = 0; i < EXAMPLE_LED_NUMBERS; i++) {
-        led_strip_pixels[i * 3 + 0] = intensity; // Green
-        led_strip_pixels[i * 3 + 1] = intensity; // Blue
-        led_strip_pixels[i * 3 + 2] = intensity; // Red
+        led_strip_pixels[i * 3 + 0] =
+            ((uint16_t)led_command.g * intensity) / 255;
+        led_strip_pixels[i * 3 + 1] =
+            ((uint16_t)led_command.b * intensity) / 255;
+        led_strip_pixels[i * 3 + 2] =
+            ((uint16_t)led_command.r * intensity) / 255;
       }
       if (intensity > 0) {
         pulse_ticks++;
@@ -236,8 +237,7 @@ void start_led_loop() {
       ESP_ERROR_CHECK(rmt_transmit(led_chan, led_encoder, led_strip_pixels,
                                    sizeof(led_strip_pixels), &tx_config));
       rmt_tx_wait_all_done(led_chan, rmt_timeout);
-      // Delay to prevent spinning - only update when state changes
-      vTaskDelay(pdMS_TO_TICKS(10));
+      vTaskDelay(pdMS_TO_TICKS(30));
       break;
     }
     }
