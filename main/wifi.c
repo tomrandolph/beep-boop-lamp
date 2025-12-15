@@ -1,18 +1,21 @@
-#include "esp_event.h"         //for wifi event
+#include "dns_server.h"
+#include "driver/gpio.h"
+#include "esp_event.h" // for wifi event
+#include "esp_http_server.h"
 #include "esp_log.h"           //for showing logs
 #include "esp_system.h"        //esp_init funtions esp_err_t
 #include "esp_wifi.h"          //esp_wifi_init functions and wifi operations
 #include "freertos/FreeRTOS.h" //for delay,mutexs,semphrs rtos operations
 #include "freertos/task.h"
+
 #include "lwip/err.h"  //light weight ip packets error handling
 #include "lwip/sys.h"  //system applications for light weight ip apps
 #include "nvs_flash.h" //non volatile storage
 #include <stdio.h>     //for basic printf commands
 #include <string.h>    //for handling strings
 
-#define WIFI_SSID CONFIG_WIFI_SSID
-#define WIFI_PASS CONFIG_WIFI_PASS
 #define WIFI_RETRY_NUM 10
+#define WIFI_NS "wifi"
 #define MODULE_TAG "WIFI"
 static int retry_num = 0;
 
@@ -124,41 +127,23 @@ static void wifi_event_handler(void *event_handler_arg,
     }
   }
 }
-void wifi_connection(void (*on_wifi_connected_callback)(void)) {
+void wifi_connection(const char *ssid, const char *pass,
+                     void (*on_wifi_connected_callback)(void)) {
   on_wifi_connected_handler = on_wifi_connected_callback;
   retry_num = 0; // Reset retry counter
 
-  // Initialize NVS - required for WiFi to store configuration
-  esp_err_t ret = nvs_flash_init();
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-      ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    // NVS partition was truncated and needs to be erased
-    ESP_LOGW(MODULE_TAG, "NVS partition needs to be erased, erasing...");
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ret = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(ret);
-
-  esp_netif_init();                // network interdace initialization
-  esp_event_loop_create_default(); // responsible for handling and dispatching
-                                   // events
   esp_netif_create_default_wifi_sta(); // sets up necessary data structs for
                                        // wifi station interface
-  wifi_init_config_t wifi_initiation =
-      WIFI_INIT_CONFIG_DEFAULT(); // sets up wifi wifi_init_config struct with
-                                  // default values
-  esp_wifi_init(
-      &wifi_initiation); // wifi initialised with dafault wifi_initiation
+
   esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler,
                              NULL); // creating event handler register for wifi
   esp_event_handler_register(
       IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler,
       NULL); // creating event handler register for ip event
   wifi_config_t wifi_config = {0}; // Zero-initialize the structure
-  strncpy((char *)wifi_config.sta.ssid, WIFI_SSID,
-          sizeof(wifi_config.sta.ssid) - 1);
+  strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
   wifi_config.sta.ssid[sizeof(wifi_config.sta.ssid) - 1] = '\0';
-  strncpy((char *)wifi_config.sta.password, WIFI_PASS,
+  strncpy((char *)wifi_config.sta.password, pass,
           sizeof(wifi_config.sta.password) - 1);
   wifi_config.sta.password[sizeof(wifi_config.sta.password) - 1] = '\0';
   wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
@@ -177,6 +162,166 @@ void wifi_connection(void (*on_wifi_connected_callback)(void)) {
   esp_wifi_start();
   // start connection with configurations provided in funtion
   esp_wifi_connect(); // connect with saved ssid and pass
-  ESP_LOGI(MODULE_TAG, "wifi_init_sta finished. SSID:%s  password:%s",
-           WIFI_SSID, WIFI_PASS);
+  ESP_LOGI(MODULE_TAG, "wifi_init_sta finished. SSID:%s  password:%s", ssid,
+           pass);
+}
+
+void save_wifi_credentials(const char *ssid, const char *pass) {
+  nvs_handle_t nvs;
+  nvs_open(WIFI_NS, NVS_READWRITE, &nvs);
+
+  nvs_set_str(nvs, "ssid", ssid);
+  nvs_set_str(nvs, "pass", pass);
+
+  uint8_t valid = 1;
+  nvs_set_u8(nvs, "valid", valid);
+
+  nvs_commit(nvs);
+  nvs_close(nvs);
+}
+
+static void start_softap(void) {
+  wifi_config_t ap_config = {.ap = {.ssid = "ESP32-Setup",
+                                    .ssid_len = 0,
+                                    .password = "configureme",
+                                    .channel = 1,
+                                    .max_connection = 4,
+                                    .authmode = WIFI_AUTH_WPA2_PSK}};
+
+  if (strlen((char *)ap_config.ap.password) == 0) {
+    ap_config.ap.authmode = WIFI_AUTH_OPEN;
+  }
+
+  esp_wifi_set_mode(WIFI_MODE_AP);
+  esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+  esp_wifi_start();
+}
+esp_err_t captive_portal_redirect(httpd_req_t *req) {
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+static esp_err_t wifi_post_handler(httpd_req_t *req) {
+  char buf[128];
+  int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (ret <= 0)
+    return ESP_FAIL;
+  buf[ret] = 0;
+
+  char ssid[33] = {0};
+  char pass[65] = {0};
+
+  httpd_query_key_value(buf, "ssid", ssid, sizeof(ssid));
+  httpd_query_key_value(buf, "pass", pass, sizeof(pass));
+
+  save_wifi_credentials(ssid, pass);
+
+  httpd_resp_sendstr(req, "Saved. Rebooting...");
+  esp_restart();
+  return ESP_OK;
+}
+static esp_err_t root_get_handler(httpd_req_t *req) {
+  const char *html =
+      "<!DOCTYPE html><html><body>"
+      "<h2>Wi-Fi Setup</h2>"
+      "<form method=\"POST\" action=\"/wifi\">"
+      "SSID:<br><input name=\"ssid\"><br>"
+      "Password:<br><input name=\"pass\" type=\"password\"><br><br>"
+      "<button type=\"submit\">Save</button>"
+      "</form></body></html>";
+
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_sendstr(req, html);
+  return ESP_OK;
+}
+
+static httpd_handle_t start_http_server(void) {
+  httpd_handle_t server = NULL;
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+
+  httpd_start(&server, &config);
+  httpd_uri_t redirect_uri = {.uri = "/*",
+                              .method = HTTP_GET,
+                              .handler = captive_portal_redirect,
+                              .user_ctx = NULL};
+
+  httpd_register_uri_handler(server, &redirect_uri);
+  httpd_uri_t wifi_post = {
+      .uri = "/wifi", .method = HTTP_POST, .handler = wifi_post_handler};
+  httpd_uri_t root = {
+      .uri = "/", .method = HTTP_GET, .handler = root_get_handler};
+  httpd_register_uri_handler(server, &root);
+
+  httpd_register_uri_handler(server, &wifi_post);
+  return server;
+}
+void start_wifi_provisioning(void) {
+  esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap(); // IMPORTANT
+  start_softap();
+
+  start_http_server();
+  // Start DNS hijack LAST
+
+  dns_server_config_t dns_cfg = {
+      .num_of_entries = 1,
+      .item = {{
+          .name = "*",
+          .if_key = esp_netif_get_ifkey(ap_netif),
+      }},
+  };
+
+  start_dns_server(&dns_cfg);
+}
+bool load_wifi_credentials(char *ssid, size_t ssid_len, char *pass,
+                           size_t pass_len) {
+  nvs_handle_t nvs;
+  uint8_t valid = 0;
+
+  if (nvs_open(WIFI_NS, NVS_READONLY, &nvs) != ESP_OK)
+    return false;
+
+  nvs_get_u8(nvs, "valid", &valid);
+  if (!valid) {
+    nvs_close(nvs);
+    return false;
+  }
+
+  nvs_get_str(nvs, "ssid", ssid, &ssid_len);
+  nvs_get_str(nvs, "pass", pass, &pass_len);
+
+  nvs_close(nvs);
+  return true;
+}
+#define RESET_BTN GPIO_NUM_12
+
+void wifi_reset_button_init(void) {
+  gpio_config_t cfg = {
+      .pin_bit_mask = 1ULL << RESET_BTN,
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = GPIO_PULLUP_ENABLE,
+  };
+  gpio_config(&cfg);
+}
+bool wifi_reset_button_held(uint32_t ms) {
+  uint32_t elapsed = 0;
+
+  while (gpio_get_level(RESET_BTN) == 0) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+    elapsed += 10;
+    if (elapsed >= ms)
+      return true;
+  }
+  return false;
+}
+void clear_wifi_credentials(void) {
+  nvs_handle_t nvs;
+  nvs_open(WIFI_NS, NVS_READWRITE, &nvs);
+
+  uint8_t valid = 0;
+  nvs_set_u8(nvs, "valid", valid);
+
+  nvs_commit(nvs);
+  nvs_close(nvs);
 }

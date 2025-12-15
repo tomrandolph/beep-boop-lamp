@@ -1,7 +1,10 @@
 #include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_wifi.h" //esp_wifi_init functions and wifi operations
 #include "led.h"
 #include "mqtt.h"
 #include "mqtt_client.h"
+#include "nvs_flash.h"
 #include "wifi.h"
 #define MODULE_TAG "MAIN"
 
@@ -138,6 +141,25 @@ void app_main(void) {
   // start a task for led loop with lower priority than WiFi/MQTT
   // Priority 3 is lower than typical MQTT (5) and WiFi (23) priorities
   xTaskCreate(start_led_loop, "led_loop", 2048, NULL, 3, NULL);
+  ESP_ERROR_CHECK(nvs_flash_init());
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+  wifi_init_config_t wifi_initiation =
+      WIFI_INIT_CONFIG_DEFAULT(); // sets up wifi wifi_init_config struct with
+                                  // default values
+  esp_wifi_init(
+      &wifi_initiation); // wifi initialised with dafault wifi_initiation
+  wifi_reset_button_init();
+  if (wifi_reset_button_held(3000)) {
+    clear_wifi_credentials();
+    esp_restart();
+  }
 
-  wifi_connection(on_wifi_connected_handler);
+  char ssid[33], pass[65];
+  if (!load_wifi_credentials(ssid, sizeof(ssid), pass, sizeof(pass))) {
+    start_wifi_provisioning();
+    return;
+  }
+
+  wifi_connection(ssid, pass, on_wifi_connected_handler);
 }
