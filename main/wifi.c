@@ -202,13 +202,47 @@ esp_err_t captive_portal_redirect(httpd_req_t *req) {
   httpd_resp_send(req, NULL, 0);
   return ESP_OK;
 }
+static void url_decode(char *dst, const char *src) {
+  char a, b;
+  while (*src) {
+    if (*src == '%') {
+      a = src[1];
+      b = src[2];
+      if (a && b) {
+        if (a >= 'A')
+          a = (a & 0xDF) - 'A' + 10;
+        else
+          a -= '0';
+        if (b >= 'A')
+          b = (b & 0xDF) - 'A' + 10;
+        else
+          b -= '0';
+        *dst++ = (char)(a << 4 | b);
+        src += 3;
+      }
+    } else if (*src == '+') {
+      *dst++ = ' ';
+      src++;
+    } else {
+      *dst++ = *src++;
+    }
+  }
+  *dst = '\0';
+}
 
 static esp_err_t wifi_post_handler(httpd_req_t *req) {
   char buf[128];
-  int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-  if (ret <= 0)
-    return ESP_FAIL;
-  buf[ret] = 0;
+  int remaining = req->content_len;
+  int offset = 0;
+
+  while (remaining > 0) {
+    int ret = httpd_req_recv(req, buf + offset, remaining);
+    if (ret <= 0)
+      break;
+    offset += ret;
+    remaining -= ret;
+  }
+  buf[offset] = 0;
 
   char ssid[33] = {0};
   char pass[65] = {0};
@@ -216,8 +250,13 @@ static esp_err_t wifi_post_handler(httpd_req_t *req) {
   httpd_query_key_value(buf, "ssid", ssid, sizeof(ssid));
   httpd_query_key_value(buf, "pass", pass, sizeof(pass));
 
-  save_wifi_credentials(ssid, pass);
+  char ssid_dec[33];
+  char pass_dec[65];
 
+  url_decode(ssid_dec, ssid);
+  url_decode(pass_dec, pass);
+
+  save_wifi_credentials(ssid_dec, pass_dec);
   httpd_resp_sendstr(req, "Saved. Rebooting...");
   esp_restart();
   return ESP_OK;
