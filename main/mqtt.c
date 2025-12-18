@@ -33,29 +33,6 @@ static void mqtt_connection_event_handler(void *handler_args,
     ESP_LOGI(MODULE_TAG, "MQTT disconnected");
     mqtt_connected = false;
     break;
-    //   case MQTT_EVENT_DATA:
-    //     ESP_LOGI(MODULE_TAG, "Received on topic: %.*s\n", event->topic_len,
-    //              event->topic);
-    //     ESP_LOGI(MODULE_TAG, "MQTT received: %.*s", event->data_len,
-    //     event->data);
-    //     // Convert payload to a null-terminated string
-    //     char payload[64];
-    //     int len = event->data_len;
-    //     if (len >= sizeof(payload))
-    //       len = sizeof(payload) - 1;
-
-    //     memcpy(payload, event->data, len);
-    //     payload[len] = '\0';
-
-    //     // Compare
-    //     if (strcmp(payload, "ON") == 0) {
-    //       ESP_LOGI(MODULE_TAG, "Flag set to TRUE");
-    //     } else if (strcmp(payload, "OFF") == 0) {
-    //       ESP_LOGI(MODULE_TAG, "Flag set to FALSE");
-    //     } else if (strcmp(payload, "BLINK") == 0) {
-    //       ESP_LOGI(MODULE_TAG, "Flag set to FALSE");
-    //     }
-    //     break;
   default:
     break;
   }

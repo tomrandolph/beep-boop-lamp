@@ -1,10 +1,16 @@
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h" //esp_wifi_init functions and wifi operations
+#include "freertos/projdefs.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 #include "led.h"
 #include "mqtt.h"
 #include "mqtt_client.h"
 #include "nvs_flash.h"
+#include "soc/gpio_num.h"
 #include "wifi.h"
 #define MODULE_TAG "MAIN"
 
@@ -134,10 +140,61 @@ static void on_wifi_connected_handler(void) {
   start_mqtt_client(on_mqtt_message_handler);
 }
 
+#define BUTTON_GPIO GPIO_NUM_32
+
+static void init_input_button(void) {
+  gpio_config_t io_conf = {
+      .pin_bit_mask = 1ULL << BUTTON_GPIO,
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = GPIO_PULLUP_ENABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_NEGEDGE // HIGH → LOW (button press)
+  };
+
+  gpio_config(&io_conf);
+}
+
+static QueueHandle_t button_evt_queue;
+
+extern esp_mqtt_client_handle_t mqtt_client;
+static void IRAM_ATTR button_isr_handler(void *arg) {
+  uint32_t gpio_num = (uint32_t)arg;
+
+  xQueueSendFromISR(button_evt_queue, &gpio_num, NULL);
+}
+static void button_task(void *arg) {
+  uint32_t io_num;
+  int64_t last_press_time = 0;
+
+  while (1) {
+    if (xQueueReceive(button_evt_queue, &io_num, portMAX_DELAY)) {
+
+      int64_t now = esp_timer_get_time(); // µs
+      if (now - last_press_time < 400000) {
+        continue; // debounce: 400ms
+      }
+      last_press_time = now;
+
+      ESP_LOGI("BUTTON", "Button pressed");
+      led_command_t cmd = {STATE_PULSE_WAVE, 255, 255, 255};
+      set_led_cmd(cmd);
+      //   esp_mqtt_client_publish(mqtt_client, "device/button", "PRESSED", 0,
+      //   1, 0);
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+}
+
 void app_main(void) {
   ESP_LOGI(MODULE_TAG, "Starting application");
   // start
   init_led_strip();
+  init_input_button();
+  button_evt_queue = xQueueCreate(5, sizeof(uint32_t));
+  gpio_install_isr_service(0);
+  gpio_isr_handler_add(BUTTON_GPIO, button_isr_handler, (void *)BUTTON_GPIO);
+
+  xTaskCreate(button_task, "button_task", 4096, NULL, 10, NULL);
   // start a task for led loop with lower priority than WiFi/MQTT
   // Priority 3 is lower than typical MQTT (5) and WiFi (23) priorities
   xTaskCreate(start_led_loop, "led_loop", 2048, NULL, 3, NULL);
